@@ -1,6 +1,7 @@
-// server.js - ADD THIS TO YOUR EXISTING SERVER.JS
+// server.js - Updated with SPA support
 const express = require("express");
 const cors = require("cors");
+const path = require("path");
 const dotenv = require("dotenv");
 dotenv.config();
 
@@ -13,9 +14,6 @@ app.use(cors({
   credentials: true
 }));
 
-// Serve uploaded files
-app.use("/uploads", express.static("uploads"));
-
 // Body parser middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -23,23 +21,34 @@ app.use(express.urlencoded({ extended: true }));
 // Connect to MongoDB
 connectDB();
 
-// Import routes
+// Serve uploaded files
+app.use("/uploads", express.static("uploads"));
+
+// API Routes - All API routes should be prefixed with /api
 const AuthRoutes = require("./routes/auth");
 const LinkRoutes = require("./routes/links");
 const UserRoutes = require("./routes/user");
 const ThemeRoutes = require("./routes/theme");
-const PublicRoutes = require("./routes/public"); // ADD THIS
+const PublicRoutes = require("./routes/public");
 
-// API Routes
 app.use("/api/auth", AuthRoutes);
-app.use("/api", LinkRoutes);
-app.use("/api", UserRoutes);
-app.use("/api", ThemeRoutes);
-app.use("/api/public", PublicRoutes); // ADD THIS - Public profile routes
+app.use("/api/links", LinkRoutes);
+app.use("/api/user", UserRoutes);
+app.use("/api/theme", ThemeRoutes);
+app.use("/api/public", PublicRoutes);
 
-// Health check
-app.get("/", (req, res) => {
-  res.json({ message: "Mymee.link API is running!" });
+// Serve static files from React build
+app.use(express.static(path.join(__dirname, "client/dist"))); // or "client/build" if using create-react-app
+
+// Catch-all route - MUST be after all API routes
+// This sends all non-API requests to React Router
+app.get("*", (req, res) => {
+  // Don't handle API routes here
+  if (req.path.startsWith("/api")) {
+    return res.status(404).json({ message: "API endpoint not found" });
+  }
+  
+  res.sendFile(path.join(__dirname, "client/dist", "index.html")); // or "client/build" if using CRA
 });
 
 // Error handling middleware
