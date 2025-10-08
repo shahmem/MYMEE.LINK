@@ -29,7 +29,7 @@ const createEmailTransporter = () => {
 const sendEmailOTP = async (email, otp) => {
   try {
     const transporter = createEmailTransporter();
-    
+        console.log("trans:",transporter);
     const mailOptions = {
       from: process.env.EMAIL_USER,
       to: email,
@@ -46,6 +46,8 @@ const sendEmailOTP = async (email, otp) => {
         </div>
       `
     };
+    console.log(mailOptions);
+    
     
     await transporter.sendMail(mailOptions);
     return { success: true };
