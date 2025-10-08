@@ -41,13 +41,8 @@ app.use("/api/public", PublicRoutes);
 app.use(express.static(path.join(__dirname, "client/dist"))); // or "client/build" if using create-react-app
 
 // Catch-all route - MUST be after all API routes
-// This sends all non-API requests to React Router
-app.get("*", (req, res) => {
-  // Don't handle API routes here
-  if (req.path.startsWith("/api")) {
-    return res.status(404).json({ message: "API endpoint not found" });
-  }
-  
+// Use regex pattern instead of wildcard for compatibility
+app.get(/^(?!\/api).*/, (req, res) => {
   res.sendFile(path.join(__dirname, "client/dist", "index.html")); // or "client/build" if using CRA
 });
 
