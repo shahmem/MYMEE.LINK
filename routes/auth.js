@@ -58,6 +58,7 @@ const sendEmailOTP = async (email, otp) => {
 router.post("/send-email-otp", async (req, res) => {
   try {
     const { email } = req.body;
+    console.log("email:",email);
     
     if (!email) {
         return res.status(400).json({ 
@@ -82,7 +83,7 @@ router.post("/send-email-otp", async (req, res) => {
     
     // Generate OTP
     const otp = generateOTP();
-    
+        console.log("otp:",otp);
     // Store OTP with expiration (5 minutes)
     emailOtpStore.set(email.toLowerCase(), {
         otp,
