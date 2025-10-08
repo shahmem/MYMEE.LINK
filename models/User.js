@@ -1,44 +1,23 @@
-// models/User.js
+// models/User.js - Fixed duplicate index warnings
 const mongoose = require("mongoose");
 
-// Social Link Schema - Separate from regular links
+// Social Link Schema
 const SocialLinkSchema = new mongoose.Schema(
   {
     title: {
       type: String,
       required: true,
-      lowercase: true, // Auto-convert to lowercase
+      lowercase: true,
       enum: [
-        "instagram",
-        "call",
-        "contact",
-        "facebook",
-        "twitter",
-        "youtube",
-        "linkedin",
-        "tiktok",
-        "spotify",
-        "github",
-        "behance",
-        "dribbble",
-        "discord",
-        "reddit",
-        "telegram",
-        "twitch",
-        "pinterest",
-        "whatsapp",
-        "snapchat",
-        "clubhouse",
-        "amazon",
-        "flipkart",
-        "googleplay",
-        "email",
-        "music",
-        "podcast",
+        "instagram", "call", "contact", "facebook", "twitter", 
+        "youtube", "linkedin", "tiktok", "spotify", "github", 
+        "behance", "dribbble", "discord", "reddit", "telegram", 
+        "twitch", "pinterest", "whatsapp", "snapchat", "clubhouse", 
+        "amazon", "flipkart", "googleplay", "email", "music", "podcast"
       ],
     },
     url: { type: String, required: true },
-    icon: { type: String, required: true }, // Platform name (lowercase)
+    icon: { type: String, required: true },
     socialorder: { type: Number, default: 0 },
     active: { type: Boolean, default: true },
   },
@@ -58,7 +37,7 @@ const LinkSchema = new mongoose.Schema(
         message: "URL must start with http:// or https://",
       },
     },
-    icon: { type: String }, // Uploaded image path
+    icon: { type: String },
     order: { type: Number, default: 0 },
     clicks: { type: Number, default: 0 },
     active: { type: Boolean, default: true },
@@ -71,7 +50,6 @@ const LinkSchema = new mongoose.Schema(
   { _id: true }
 );
 
-// Theme Schema
 const ThemeSchema = new mongoose.Schema(
   {
     name: { type: String, default: "custom" },
@@ -101,7 +79,6 @@ const ThemeSchema = new mongoose.Schema(
   { _id: false }
 );
 
-// Analytics Schema
 const AnalyticsSchema = new mongoose.Schema(
   {
     totalViews: { type: Number, default: 0 },
@@ -116,8 +93,8 @@ const AnalyticsSchema = new mongoose.Schema(
 // Main User Schema
 const UserSchema = new mongoose.Schema(
   {
-    // Authentication
-    auth_id: { type: String, required: true, unique: true, index: true },
+    // Authentication - Removed index: true here since we use .index() below
+    auth_id: { type: String, required: true, unique: true },
     password: { type: String, required: true, minlength: 6 },
     email: {
       type: String,
@@ -147,18 +124,16 @@ const UserSchema = new mongoose.Schema(
         validator: function (v) {
           return /^[a-z0-9_]+$/.test(v);
         },
-        message:
-          "Username can only contain lowercase letters, numbers, and underscores",
+        message: "Username can only contain lowercase letters, numbers, and underscores",
       },
-      index: true,
     },
     profileImage: { type: String, default: "" },
     bio: { type: String, default: "", maxlength: 200 },
     header: { type: String, default: "", maxlength: 100 },
 
-    // Links - TWO SEPARATE ARRAYS
-    links: [LinkSchema], // Regular links
-    socialLinks: [SocialLinkSchema], // Social media links
+    // Links
+    links: [LinkSchema],
+    socialLinks: [SocialLinkSchema],
 
     // Theme
     theme: {
@@ -203,7 +178,7 @@ const UserSchema = new mongoose.Schema(
   }
 );
 
-// Indexes
+// Create indexes - Only define them once here
 UserSchema.index({ username: 1 });
 UserSchema.index({ auth_id: 1 });
 UserSchema.index({ email: 1 });
