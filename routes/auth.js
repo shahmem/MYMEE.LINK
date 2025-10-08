@@ -85,11 +85,12 @@ router.post("/send-email-otp", async (req, res) => {
     const otp = generateOTP();
         console.log("otp:",otp);
     // Store OTP with expiration (5 minutes)
+    
     emailOtpStore.set(email.toLowerCase(), {
         otp,
         expiresAt: Date.now() + 5 * 60 * 1000
     });
-
+    console.log("emailotpstore");
     
     // Send OTP via Email
     const result = await sendEmailOTP(email, otp);
