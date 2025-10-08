@@ -37,9 +37,9 @@ const ThemeRoutes = require("./routes/theme");
 const PublicRoutes = require("./routes/public");
 
 app.use("/api/auth", AuthRoutes);
-app.use("/api/links", LinkRoutes);
-app.use("/api/user", UserRoutes);
-app.use("/api/theme", ThemeRoutes);
+app.use("/api", LinkRoutes);
+app.use("/api", UserRoutes);
+app.use("/api", ThemeRoutes);
 app.use("/api/public", PublicRoutes);
 
 // Health check endpoint
@@ -48,9 +48,9 @@ app.get("/", (req, res) => {
     message: "Mymee.link API is running!",
     endpoints: {
       auth: "/api/auth",
-      links: "/api/links",
-      user: "/api/user",
-      theme: "/api/theme",
+      links: "/api",
+      user: "/api",
+      theme: "/api",
       public: "/api/public"
     }
   });
