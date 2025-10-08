@@ -92,7 +92,8 @@ router.post("/send-email-otp", async (req, res) => {
     
     // Send OTP via Email
     const result = await sendEmailOTP(email, otp);
-    
+    console.log(result);
+        
     if (!result.success) {
       return res.status(500).json({ 
         message: "Failed to send OTP. Please try again.",
@@ -260,6 +261,7 @@ router.post("/resend-email-otp", async (req, res) => {
     
     // Send new OTP
     const result = await sendEmailOTP(email, otp);
+    console.log(result);
     
     if (!result.success) {
       return res.status(500).json({ 
