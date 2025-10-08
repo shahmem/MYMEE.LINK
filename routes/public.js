@@ -1,4 +1,4 @@
-// routes/public.js - CREATE THIS NEW FILE
+// routes/public.js
 const express = require("express");
 const router = express.Router();
 const User = require("../models/User");
@@ -8,33 +8,34 @@ router.get("/:username", async (req, res) => {
   try {
     const { username } = req.params;
 
-    // Find user by username
-    const user = await User.findOne({ 
-      username: username.toLowerCase(),
-      isActive: true // Only show active profiles
-    }).select("-password -email -auth_id"); // Exclude sensitive fields
+    // Find user by username using the static method
+    const user = await User.findByUsername(username);
 
-    if (!user) {
+    if (!user || !user.isActive || !user.isPublic) {
       return res.status(404).json({ message: "Profile not found" });
     }
 
-    // Filter only active links
-    const activeLinks = user.links.filter(link => link.active !== false);
-    const activeSocialLinks = user.socialLinks.filter(link => link.active !== false);
+    // Update analytics (optional)
+    user.analytics.totalViews = (user.analytics.totalViews || 0) + 1;
+    user.analytics.lastVisit = new Date();
+    await user.save();
+
+    // Get public profile data using the instance method
+    const publicProfile = user.getPublicProfile();
 
     // Return public profile data
     res.json({
       user: {
-        name: user.name,
-        username: user.username,
-        profileImage: user.profileImage,
-        bio: user.bio,
-        header: user.header,
+        name: publicProfile.name,
+        username: publicProfile.username,
+        profileImage: publicProfile.profileImage,
+        bio: publicProfile.bio,
+        header: publicProfile.header,
       },
-      links: activeLinks.sort((a, b) => a.order - b.order),
-      socialLinks: activeSocialLinks.sort((a, b) => a.socialorder - b.socialorder),
-      theme: user.theme,
-      position: user.socialPosition || 'top',
+      links: publicProfile.links,
+      socialLinks: publicProfile.socialLinks,
+      theme: publicProfile.theme,
+      position: publicProfile.socialPosition,
     });
 
   } catch (err) {
