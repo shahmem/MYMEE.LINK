@@ -29,7 +29,7 @@ const createEmailTransporter = () => {
 const sendEmailOTP = async (email, otp) => {
   try {
     const transporter = createEmailTransporter();
-    
+        console.log("trans:",transporter);
     const mailOptions = {
       from: process.env.EMAIL_USER,
       to: email,
@@ -46,6 +46,8 @@ const sendEmailOTP = async (email, otp) => {
         </div>
       `
     };
+    console.log(mailOptions);
+    
     
     await transporter.sendMail(mailOptions);
     return { success: true };
@@ -58,6 +60,7 @@ const sendEmailOTP = async (email, otp) => {
 router.post("/send-email-otp", async (req, res) => {
   try {
     const { email } = req.body;
+    console.log("email:",email);
     
     if (!email) {
         return res.status(400).json({ 
@@ -82,13 +85,14 @@ router.post("/send-email-otp", async (req, res) => {
     
     // Generate OTP
     const otp = generateOTP();
-    
+        console.log("otp:",otp);
     // Store OTP with expiration (5 minutes)
     emailOtpStore.set(email.toLowerCase(), {
         otp,
         expiresAt: Date.now() + 5 * 60 * 1000
     });
 
+    console.log("emailotpstore");
     
     // Send OTP via Email
     const result = await sendEmailOTP(email, otp);
