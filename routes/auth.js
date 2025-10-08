@@ -29,7 +29,12 @@ const createEmailTransporter = () => {
 const sendEmailOTP = async (email, otp) => {
   try {
     const transporter = createEmailTransporter();
-        console.log("trans:",transporter);
+    console.log("✅ Transporter created successfully");
+
+    await transporter.verify()
+      .then(() => console.log("✅ SMTP connection verified"))
+      .catch((err) => console.error("❌ SMTP verification failed:", err));
+
     const mailOptions = {
       from: process.env.EMAIL_USER,
       to: email,
@@ -46,16 +51,19 @@ const sendEmailOTP = async (email, otp) => {
         </div>
       `
     };
-    console.log(mailOptions);
+
+    console.log("📦 Mail options prepared:", mailOptions);
+
+    const info = await transporter.sendMail(mailOptions);
+    console.log("📨 Email sent successfully:", info);
     
-    
-    await transporter.sendMail(mailOptions);
     return { success: true };
   } catch (error) {
-    console.error("Email OTP Error:", error);
+    console.error("❌ Email OTP Error:", error);
     return { success: false, error: error.message };
   }
 };
+
 // 1. Send OTP to Email
 router.post("/send-email-otp", async (req, res) => {
   try {
