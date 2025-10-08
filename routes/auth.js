@@ -17,13 +17,16 @@ const emailOtpStore = new Map();
 // Configure email transporter
 const createEmailTransporter = () => {
   return nodemailer.createTransport({
-    service: 'gmail', // or your email service
+    host: "smtp.gmail.com",
+    port: 587,
+    secure: false, // TLS instead of SSL
     auth: {
       user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASSWORD // Use App Password for Gmail
+      pass: process.env.EMAIL_PASSWORD // App Password
     }
   });
 };
+
 
 // Send OTP via Email
 const sendEmailOTP = async (email, otp) => {
