@@ -9,80 +9,99 @@ require("dotenv").config();
 // Initialize Twilio client
 const twilio = require("twilio");
 const nodemailer = require("nodemailer");
-const { google } = require("googleapis");
+const { Resend } = require("resend");
+
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 // Store OTPs temporarily (in production, use Redis)
 const otpStore = new Map();
 const emailOtpStore = new Map();
 
-const createEmailTransporter = () => {
-  return nodemailer.createTransport({
-    service: "gmail",
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass:  process.env.EMAIL_PASSWORD,
-    },
-  });
-};
-
 const sendEmailOTP = async (email, otp) => {
   try {
-    const transporter = createEmailTransporter();
-
-    const mailOptions = {
-      from: process.env.EMAIL_USER,
+    const { data, error } = await resend.emails.send({
+      from: 'Mymee.link <noreply@mymee.link>', // ✅ Change this line
       to: email,
-      subject: "Mymee.link - Email Verification",
-      html: `<h2>Verify Your Email</h2><p>OTP: <b>${otp}</b></p>`,
-    };
+      subject: 'Mymee.link - Email Verification',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #333;">Verify Your Email</h2>
+          <p style="font-size: 16px;">Your verification code is:</p>
+          <div style="background: #f4f4f4; padding: 20px; text-align: center; font-size: 32px; font-weight: bold; letter-spacing: 5px; margin: 20px 0;">
+            ${otp}
+          </div>
+          <p style="color: #666;">This code will expire in 5 minutes.</p>
+          <p style="color: #999; font-size: 12px;">If you didn't request this code, please ignore this email.</p>
+        </div>
+      `,
+    });
 
-    await transporter.sendMail(mailOptions);
+    if (error) {
+      console.error("❌ Resend Error:", error);
+      return { success: false, error: error.message };
+    }
+
+    console.log("✅ Email sent successfully:", data.id);
     return { success: true };
   } catch (error) {
-    console.error("Email OTP Error:", error);
+    console.error("❌ Email OTP Error:", error);
     return { success: false, error: error.message };
   }
+};
+
+// Generate 6-digit OTP
+const generateOTP = () => {
+  return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
 // 1. Send OTP to Email
 router.post("/send-email-otp", async (req, res) => {
   try {
     const { email } = req.body;
-    console.log("email:", email);
+    console.log("📧 Sending OTP to:", email);
+
     if (!email) {
       return res.status(400).json({ message: "Email is required" });
     }
+
     if (!/^\S+@\S+\.\S+$/.test(email)) {
       return res.status(400).json({ message: "Invalid email format" });
     }
+
     const existingUser = await User.findOne({ email: email.toLowerCase() });
     if (existingUser) {
       return res.status(400).json({ message: "Email already registered" });
     }
+
     const otp = generateOTP();
-    console.log("otp:", otp);
+    console.log("🔢 Generated OTP:", otp);
+
     emailOtpStore.set(email.toLowerCase(), {
       otp,
       expiresAt: Date.now() + 5 * 60 * 1000,
     });
-    console.log("emailotpstore");
+
     const result = await sendEmailOTP(email, otp);
-    console.log(result);
+    console.log("📤 Send result:", result);
+
     if (!result.success) {
       return res.status(500).json({
         message: "Failed to send OTP. Please try again.",
         error: result.error,
       });
     }
+
     res.status(200).json({
       message: "OTP sent successfully to your email",
       devOTP: process.env.NODE_ENV === "development" ? otp : undefined,
     });
   } catch (error) {
+    console.error("❌ Server error:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 });
-// 4. Resend Email OTP (production-ready)
+
+// 2. Resend Email OTP
 router.post("/resend-email-otp", async (req, res) => {
   try {
     const { email } = req.body;
@@ -91,12 +110,10 @@ router.post("/resend-email-otp", async (req, res) => {
       return res.status(400).json({ message: "Email is required" });
     }
 
-    // Validate email format
     if (!/^\S+@\S+\.\S+$/.test(email)) {
       return res.status(400).json({ message: "Invalid email format" });
     }
 
-    // Check if email exists in your OTP store
     const existingOtp = emailOtpStore.get(email.toLowerCase());
     if (!existingOtp) {
       return res
@@ -104,16 +121,13 @@ router.post("/resend-email-otp", async (req, res) => {
         .json({ message: "No pending OTP found for this email" });
     }
 
-    // Generate new OTP
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otp = generateOTP();
 
-    // Update OTP store with new OTP and reset expiration (5 minutes)
     emailOtpStore.set(email.toLowerCase(), {
       otp,
       expiresAt: Date.now() + 5 * 60 * 1000,
     });
 
-    // Send OTP via Gmail OAuth2
     const result = await sendEmailOTP(email, otp);
 
     if (!result.success) {
@@ -133,7 +147,7 @@ router.post("/resend-email-otp", async (req, res) => {
   }
 });
 
-// 2. Verify Email OTP
+// 3. Verify Email OTP
 router.post("/verify-email-otp", async (req, res) => {
   try {
     const { email, otp } = req.body;
@@ -165,7 +179,6 @@ router.post("/verify-email-otp", async (req, res) => {
       });
     }
 
-    // OTP is valid - return success
     res.status(200).json({
       message: "Email verified successfully",
       verified: true,
@@ -175,14 +188,17 @@ router.post("/verify-email-otp", async (req, res) => {
   }
 });
 
-// 3. Complete Email Signup (Create Account)
-// 3. Complete Email Signup (Create Account)
+// 4. Complete Email Signup (Create Account)
 router.post("/complete-email-signup", async (req, res) => {
   try {
     const { email, otp, username, password } = req.body;
 
-    // ✅ Add debug logging
-    console.log("📝 Complete Signup Request:", { email, username, hasOtp: !!otp, hasPassword: !!password });
+    console.log("📝 Complete Signup Request:", {
+      email,
+      username,
+      hasOtp: !!otp,
+      hasPassword: !!password,
+    });
 
     if (!email || !otp || !username || !password) {
       return res.status(400).json({
@@ -190,9 +206,11 @@ router.post("/complete-email-signup", async (req, res) => {
       });
     }
 
-    // Verify OTP again
     const otpData = emailOtpStore.get(email.toLowerCase());
-    console.log("🔍 OTP Check:", { found: !!otpData, otpMatch: otpData?.otp === otp });
+    console.log("🔍 OTP Check:", {
+      found: !!otpData,
+      otpMatch: otpData?.otp === otp,
+    });
 
     if (!otpData || otpData.otp !== otp) {
       return res.status(400).json({
@@ -200,8 +218,6 @@ router.post("/complete-email-signup", async (req, res) => {
       });
     }
 
-    // Check if username already exists
-    console.log("👤 Checking username:", username);
     const existingUsername = await User.findOne({
       username: username.toLowerCase(),
     });
@@ -211,8 +227,6 @@ router.post("/complete-email-signup", async (req, res) => {
       });
     }
 
-    // Check if email already exists (double check)
-    console.log("📧 Checking email:", email);
     const existingEmail = await User.findOne({
       email: email.toLowerCase(),
     });
@@ -222,14 +236,11 @@ router.post("/complete-email-signup", async (req, res) => {
       });
     }
 
-    // Hash password
-    console.log(" Hashing password...");
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Create new user
-    console.log(" Creating user...");
     const newUser = new User({
-      username: username.toLowerCase(),
+      name: username, // Use username as default name
+      username: username.toLowerCase(), 
       email: email.toLowerCase(),
       auth_id: email.toLowerCase(),
       password: hashedPassword,
@@ -238,9 +249,8 @@ router.post("/complete-email-signup", async (req, res) => {
     });
 
     await newUser.save();
-    console.log(" User created:", newUser._id);
+    console.log("✅ User created:", newUser._id);
 
-    // Generate JWT token
     const token = jwt.sign(
       {
         userId: newUser._id,
@@ -250,7 +260,6 @@ router.post("/complete-email-signup", async (req, res) => {
       { expiresIn: "30d" }
     );
 
-    // Clear OTP from store
     emailOtpStore.delete(email.toLowerCase());
 
     res.status(201).json({
@@ -258,6 +267,7 @@ router.post("/complete-email-signup", async (req, res) => {
       token,
       user: {
         id: newUser._id,
+        name: newUser.name,
         username: newUser.username,
         email: newUser.email,
         profileImage: newUser.profileImage,
@@ -265,56 +275,13 @@ router.post("/complete-email-signup", async (req, res) => {
       },
     });
   } catch (error) {
-    // ✅ Better error logging
     console.error("❌ Complete Signup Error:", error);
-    res.status(500).json({ 
-      message: "Server error", 
+    res.status(500).json({
+      message: "Server error",
       error: error.message,
-      details: process.env.NODE_ENV === "development" ? error.stack : undefined
     });
   }
 });
-
-// 4. Resend Email OTP
-router.post("/resend-email-otp", async (req, res) => {
-  try {
-    const { email } = req.body;
-
-    if (!email) {
-      return res.status(400).json({
-        message: "Email is required",
-      });
-    }
-
-    // Generate new OTP
-    const otp = generateOTP();
-
-    // Update OTP store
-    emailOtpStore.set(email.toLowerCase(), {
-      otp,
-      expiresAt: Date.now() + 5 * 60 * 1000,
-    });
-
-    // Send new OTP
-    const result = await sendEmailOTP(email, otp);
-    console.log(result);
-
-    if (!result.success) {
-      return res.status(500).json({
-        message: "Failed to resend OTP",
-        error: result.error,
-      });
-    }
-
-    res.status(200).json({
-      message: "OTP resent successfully",
-      devOTP: process.env.NODE_ENV === "development" ? otp : undefined,
-    });
-  } catch (error) {
-    res.status(500).json({ message: "Server error", error: error.message });
-  }
-});
-
 // WhatsApp OTP Service (using Twilio SDK)
 const sendWhatsAppOTP = async (phoneNumber, otp) => {
   try {
@@ -336,10 +303,6 @@ const sendWhatsAppOTP = async (phoneNumber, otp) => {
   }
 };
 
-// Generate 6-digit OTP
-const generateOTP = () => {
-  return Math.floor(100000 + Math.random() * 900000).toString();
-};
 
 // 1. Check username availability
 router.post("/check-username", async (req, res) => {
