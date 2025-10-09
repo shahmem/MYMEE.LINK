@@ -111,7 +111,7 @@ const UserSchema = new mongoose.Schema(
     },
 
     // Profile
-    name: { type: String, required: true, trim: true, maxlength: 50 },
+    name: { type: String, trim: true, maxlength: 20 },
     username: {
       type: String,
       required: true,

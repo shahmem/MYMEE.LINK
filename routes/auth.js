@@ -4,51 +4,38 @@ const router = express.Router();
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
-require('dotenv').config();
+require("dotenv").config();
 
 // Initialize Twilio client
-const twilio = require('twilio');
-const nodemailer = require('nodemailer');
+const twilio = require("twilio");
+const nodemailer = require("nodemailer");
+const { google } = require("googleapis");
 
 // Store OTPs temporarily (in production, use Redis)
 const otpStore = new Map();
 const emailOtpStore = new Map();
 
-// Configure email transporter
 const createEmailTransporter = () => {
   return nodemailer.createTransport({
-    service: 'gmail', // or your email service
+    service: "gmail",
     auth: {
       user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASSWORD // Use App Password for Gmail
-    }
+      pass:  process.env.EMAIL_PASSWORD,
+    },
   });
 };
 
-// Send OTP via Email
 const sendEmailOTP = async (email, otp) => {
   try {
     const transporter = createEmailTransporter();
-        console.log("trans:",transporter);
+
     const mailOptions = {
       from: process.env.EMAIL_USER,
       to: email,
-      subject: 'Mymee.link - Email Verification',
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #2563eb;">Verify Your Email</h2>
-          <p>Your verification code is:</p>
-          <div style="background-color: #f3f4f6; padding: 20px; text-align: center; font-size: 32px; font-weight: bold; letter-spacing: 8px; margin: 20px 0;">
-            ${otp}
-          </div>
-          <p>This code will expire in 5 minutes.</p>
-          <p style="color: #6b7280; font-size: 14px;">If you didn't request this code, please ignore this email.</p>
-        </div>
-      `
+      subject: "Mymee.link - Email Verification",
+      html: `<h2>Verify Your Email</h2><p>OTP: <b>${otp}</b></p>`,
     };
-    console.log(mailOptions);
-    
-    
+
     await transporter.sendMail(mailOptions);
     return { success: true };
   } catch (error) {
@@ -56,61 +43,92 @@ const sendEmailOTP = async (email, otp) => {
     return { success: false, error: error.message };
   }
 };
+
 // 1. Send OTP to Email
 router.post("/send-email-otp", async (req, res) => {
   try {
     const { email } = req.body;
-    console.log("email:",email);
-    
+    console.log("email:", email);
     if (!email) {
-        return res.status(400).json({ 
-            message: "Email is required" 
-        });
+      return res.status(400).json({ message: "Email is required" });
     }
-    
-    // Validate email format
     if (!/^\S+@\S+\.\S+$/.test(email)) {
-        return res.status(400).json({ 
-            message: "Invalid email format" 
-        });
+      return res.status(400).json({ message: "Invalid email format" });
     }
-    
-    // Check if email already exists
     const existingUser = await User.findOne({ email: email.toLowerCase() });
     if (existingUser) {
-        return res.status(400).json({ 
-            message: "Email already registered" 
-        });
+      return res.status(400).json({ message: "Email already registered" });
     }
-    
-    // Generate OTP
     const otp = generateOTP();
-        console.log("otp:",otp);
-    // Store OTP with expiration (5 minutes)
+    console.log("otp:", otp);
     emailOtpStore.set(email.toLowerCase(), {
-        otp,
-        expiresAt: Date.now() + 5 * 60 * 1000
+      otp,
+      expiresAt: Date.now() + 5 * 60 * 1000,
     });
-
     console.log("emailotpstore");
-    
-    // Send OTP via Email
     const result = await sendEmailOTP(email, otp);
     console.log(result);
-        
     if (!result.success) {
-      return res.status(500).json({ 
+      return res.status(500).json({
         message: "Failed to send OTP. Please try again.",
-        error: result.error
+        error: result.error,
       });
     }
-    
-    res.status(200).json({ 
+    res.status(200).json({
       message: "OTP sent successfully to your email",
-      devOTP: process.env.NODE_ENV === 'development' ? otp : undefined
+      devOTP: process.env.NODE_ENV === "development" ? otp : undefined,
     });
-    
   } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+// 4. Resend Email OTP (production-ready)
+router.post("/resend-email-otp", async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ message: "Email is required" });
+    }
+
+    // Validate email format
+    if (!/^\S+@\S+\.\S+$/.test(email)) {
+      return res.status(400).json({ message: "Invalid email format" });
+    }
+
+    // Check if email exists in your OTP store
+    const existingOtp = emailOtpStore.get(email.toLowerCase());
+    if (!existingOtp) {
+      return res
+        .status(400)
+        .json({ message: "No pending OTP found for this email" });
+    }
+
+    // Generate new OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // Update OTP store with new OTP and reset expiration (5 minutes)
+    emailOtpStore.set(email.toLowerCase(), {
+      otp,
+      expiresAt: Date.now() + 5 * 60 * 1000,
+    });
+
+    // Send OTP via Gmail OAuth2
+    const result = await sendEmailOTP(email, otp);
+
+    if (!result.success) {
+      return res.status(500).json({
+        message: "Failed to resend OTP. Please try again.",
+        error: result.error,
+      });
+    }
+
+    res.status(200).json({
+      message: "OTP resent successfully to your email",
+      devOTP: process.env.NODE_ENV === "development" ? otp : undefined,
+    });
+  } catch (error) {
+    console.error("❌ Resend OTP Error:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 });
@@ -119,113 +137,122 @@ router.post("/send-email-otp", async (req, res) => {
 router.post("/verify-email-otp", async (req, res) => {
   try {
     const { email, otp } = req.body;
-    
+
     if (!email || !otp) {
-      return res.status(400).json({ 
-        message: "Email and OTP are required" 
+      return res.status(400).json({
+        message: "Email and OTP are required",
       });
     }
-    
+
     const otpData = emailOtpStore.get(email.toLowerCase());
-    
+
     if (!otpData) {
-      return res.status(400).json({ 
-        message: "OTP expired or not found" 
+      return res.status(400).json({
+        message: "OTP expired or not found",
       });
     }
-    
+
     if (Date.now() > otpData.expiresAt) {
       emailOtpStore.delete(email.toLowerCase());
-      return res.status(400).json({ 
-        message: "OTP has expired" 
+      return res.status(400).json({
+        message: "OTP has expired",
       });
     }
-    
+
     if (otpData.otp !== otp) {
-      return res.status(400).json({ 
-        message: "Invalid OTP" 
+      return res.status(400).json({
+        message: "Invalid OTP",
       });
     }
-    
+
     // OTP is valid - return success
     res.status(200).json({
       message: "Email verified successfully",
-      verified: true
+      verified: true,
     });
-    
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 
 // 3. Complete Email Signup (Create Account)
+// 3. Complete Email Signup (Create Account)
 router.post("/complete-email-signup", async (req, res) => {
   try {
     const { email, otp, username, password } = req.body;
-    
-    if (!email || !otp || !username || !password ) {
-      return res.status(400).json({ 
-        message: "All fields are required" 
+
+    // ✅ Add debug logging
+    console.log("📝 Complete Signup Request:", { email, username, hasOtp: !!otp, hasPassword: !!password });
+
+    if (!email || !otp || !username || !password) {
+      return res.status(400).json({
+        message: "All fields are required",
       });
     }
-    
+
     // Verify OTP again
     const otpData = emailOtpStore.get(email.toLowerCase());
-    
+    console.log("🔍 OTP Check:", { found: !!otpData, otpMatch: otpData?.otp === otp });
+
     if (!otpData || otpData.otp !== otp) {
-      return res.status(400).json({ 
-        message: "Invalid or expired OTP" 
+      return res.status(400).json({
+        message: "Invalid or expired OTP",
       });
     }
-    
+
     // Check if username already exists
-    const existingUsername = await User.findOne({ 
-      username: username.toLowerCase() 
+    console.log("👤 Checking username:", username);
+    const existingUsername = await User.findOne({
+      username: username.toLowerCase(),
     });
     if (existingUsername) {
-      return res.status(400).json({ 
-        message: "Username already taken" 
+      return res.status(400).json({
+        message: "Username already taken",
       });
     }
-    
+
     // Check if email already exists (double check)
-    const existingEmail = await User.findOne({ 
-      email: email.toLowerCase() 
+    console.log("📧 Checking email:", email);
+    const existingEmail = await User.findOne({
+      email: email.toLowerCase(),
     });
     if (existingEmail) {
-      return res.status(400).json({ 
-        message: "Email already registered" 
+      return res.status(400).json({
+        message: "Email already registered",
       });
     }
-    
+
     // Hash password
+    console.log(" Hashing password...");
     const hashedPassword = await bcrypt.hash(password, 10);
-    
+
     // Create new user
+    console.log(" Creating user...");
     const newUser = new User({
       username: username.toLowerCase(),
       email: email.toLowerCase(),
-      auth_id: email.toLowerCase(), // Use email as auth_id for email signups
+      auth_id: email.toLowerCase(),
       password: hashedPassword,
       isVerified: true,
-      theme: {}
+      theme: {},
     });
-    
+
     await newUser.save();
-    
+    console.log(" User created:", newUser._id);
+
     // Generate JWT token
     const token = jwt.sign(
-      { 
-        userId: newUser._id, 
-        username: newUser.username 
+      {
+        userId: newUser._id,
+        username: newUser.username,
       },
       process.env.JWT_SECRET || "your-secret-key",
       { expiresIn: "30d" }
     );
-    
+
     // Clear OTP from store
     emailOtpStore.delete(email.toLowerCase());
-    
+
     res.status(201).json({
       message: "Account created successfully",
       token,
@@ -234,12 +261,17 @@ router.post("/complete-email-signup", async (req, res) => {
         username: newUser.username,
         email: newUser.email,
         profileImage: newUser.profileImage,
-        bio: newUser.bio
-      }
+        bio: newUser.bio,
+      },
     });
-    
   } catch (error) {
-    res.status(500).json({ message: "Server error", error: error.message });
+    // ✅ Better error logging
+    console.error("❌ Complete Signup Error:", error);
+    res.status(500).json({ 
+      message: "Server error", 
+      error: error.message,
+      details: process.env.NODE_ENV === "development" ? error.stack : undefined
+    });
   }
 });
 
@@ -247,43 +279,41 @@ router.post("/complete-email-signup", async (req, res) => {
 router.post("/resend-email-otp", async (req, res) => {
   try {
     const { email } = req.body;
-    
+
     if (!email) {
-      return res.status(400).json({ 
-        message: "Email is required" 
+      return res.status(400).json({
+        message: "Email is required",
       });
     }
-    
+
     // Generate new OTP
     const otp = generateOTP();
-    
+
     // Update OTP store
     emailOtpStore.set(email.toLowerCase(), {
       otp,
-      expiresAt: Date.now() + 5 * 60 * 1000
+      expiresAt: Date.now() + 5 * 60 * 1000,
     });
-    
+
     // Send new OTP
     const result = await sendEmailOTP(email, otp);
     console.log(result);
-    
+
     if (!result.success) {
-      return res.status(500).json({ 
+      return res.status(500).json({
         message: "Failed to resend OTP",
-        error: result.error
+        error: result.error,
       });
     }
-    
-    res.status(200).json({ 
+
+    res.status(200).json({
       message: "OTP resent successfully",
-      devOTP: process.env.NODE_ENV === 'development' ? otp : undefined
+      devOTP: process.env.NODE_ENV === "development" ? otp : undefined,
     });
-    
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message });
   }
 });
-
 
 // WhatsApp OTP Service (using Twilio SDK)
 const sendWhatsAppOTP = async (phoneNumber, otp) => {
@@ -291,14 +321,14 @@ const sendWhatsAppOTP = async (phoneNumber, otp) => {
     const accountSid = process.env.TWILIO_ACCOUNT_SID;
     const authToken = process.env.TWILIO_AUTH_TOKEN;
     const client = twilio(accountSid, authToken);
-    
+
     const message = await client.messages.create({
       from: process.env.TWILIO_WHATSAPP_NUMBER,
       body: `Your Mymee.link verification code is: ${otp}. Valid for 5 minutes.`,
-      to: `whatsapp:${phoneNumber}`
+      to: `whatsapp:${phoneNumber}`,
     });
-    
-    console.log('OTP sent successfully. Message SID:', message.sid);
+
+    console.log("OTP sent successfully. Message SID:", message.sid);
     return { success: true, messageSid: message.sid };
   } catch (error) {
     console.error("WhatsApp OTP Error:", error.message);
@@ -315,35 +345,36 @@ const generateOTP = () => {
 router.post("/check-username", async (req, res) => {
   try {
     const { username } = req.body;
-    
+
     if (!username || username.length < 3) {
-      return res.status(400).json({ 
-        available: false, 
-        message: "Username must be at least 3 characters" 
+      return res.status(400).json({
+        available: false,
+        message: "Username must be at least 3 characters",
       });
     }
-    
+
     if (!/^[a-z0-9_]+$/.test(username)) {
-      return res.status(400).json({ 
-        available: false, 
-        message: "Username can only contain lowercase letters, numbers, and underscores" 
+      return res.status(400).json({
+        available: false,
+        message:
+          "Username can only contain lowercase letters, numbers, and underscores",
       });
     }
-    
-    const existingUser = await User.findOne({ 
-      username: username.toLowerCase() 
+
+    const existingUser = await User.findOne({
+      username: username.toLowerCase(),
     });
-    
+
     if (existingUser) {
-      return res.status(200).json({ 
-        available: false, 
-        message: "Username already taken" 
+      return res.status(200).json({
+        available: false,
+        message: "Username already taken",
       });
     }
-    
-    res.status(200).json({ 
-      available: true, 
-      message: "Username is available" 
+
+    res.status(200).json({
+      available: true,
+      message: "Username is available",
     });
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message });
@@ -354,33 +385,33 @@ router.post("/check-username", async (req, res) => {
 router.post("/check-whatsapp", async (req, res) => {
   try {
     const { whatsapp } = req.body;
-    
+
     if (!whatsapp) {
-      return res.status(400).json({ 
-        available: false, 
-        message: "WhatsApp number is required" 
+      return res.status(400).json({
+        available: false,
+        message: "WhatsApp number is required",
       });
     }
-    
+
     if (!/^\+?[1-9]\d{1,14}$/.test(whatsapp)) {
-      return res.status(400).json({ 
-        available: false, 
-        message: "Invalid phone number format" 
+      return res.status(400).json({
+        available: false,
+        message: "Invalid phone number format",
       });
     }
-    
+
     const existingUser = await User.findOne({ auth_id: whatsapp });
-    
+
     if (existingUser) {
-      return res.status(200).json({ 
-        available: false, 
-        message: "WhatsApp number already registered" 
+      return res.status(200).json({
+        available: false,
+        message: "WhatsApp number already registered",
       });
     }
-    
-    res.status(200).json({ 
-      available: true, 
-      message: "WhatsApp number is available" 
+
+    res.status(200).json({
+      available: true,
+      message: "WhatsApp number is available",
     });
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message });
@@ -391,56 +422,55 @@ router.post("/check-whatsapp", async (req, res) => {
 router.post("/send-otp", async (req, res) => {
   try {
     const { whatsapp, username, password } = req.body;
-    
-    if (!whatsapp || !username || !password ) {
-      return res.status(400).json({ 
-        message: "All fields are required" 
+
+    if (!whatsapp || !username || !password) {
+      return res.status(400).json({
+        message: "All fields are required",
       });
     }
-    
+
     // Check if username already exists
-    const existingUsername = await User.findOne({ 
-      username: username.toLowerCase() 
+    const existingUsername = await User.findOne({
+      username: username.toLowerCase(),
     });
     if (existingUsername) {
-      return res.status(400).json({ 
-        message: "Username already taken" 
+      return res.status(400).json({
+        message: "Username already taken",
       });
     }
-    
+
     // Check if WhatsApp number already exists
     const existingWhatsApp = await User.findOne({ auth_id: whatsapp });
     if (existingWhatsApp) {
-      return res.status(400).json({ 
-        message: "WhatsApp number already registered" 
+      return res.status(400).json({
+        message: "WhatsApp number already registered",
       });
     }
-    
+
     // Generate OTP
     const otp = generateOTP();
-    
+
     // Store OTP with expiration (5 minutes)
     otpStore.set(whatsapp, {
       otp,
       userData: { whatsapp, username, password },
-      expiresAt: Date.now() + 5 * 60 * 1000
+      expiresAt: Date.now() + 5 * 60 * 1000,
     });
-    
+
     // Send OTP via WhatsApp
     const result = await sendWhatsAppOTP(whatsapp, otp);
-    
+
     if (!result.success) {
-      return res.status(500).json({ 
+      return res.status(500).json({
         message: "Failed to send OTP. Please try again.",
-        error: result.error
+        error: result.error,
       });
     }
-    
-    res.status(200).json({ 
+
+    res.status(200).json({
       message: "OTP sent successfully to WhatsApp",
-      devOTP: process.env.NODE_ENV === 'development' ? otp : undefined
+      devOTP: process.env.NODE_ENV === "development" ? otp : undefined,
     });
-    
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message });
   }
@@ -450,39 +480,39 @@ router.post("/send-otp", async (req, res) => {
 router.post("/verify-otp", async (req, res) => {
   try {
     const { whatsapp, otp } = req.body;
-    
+
     if (!whatsapp || !otp) {
-      return res.status(400).json({ 
-        message: "WhatsApp number and OTP are required" 
+      return res.status(400).json({
+        message: "WhatsApp number and OTP are required",
       });
     }
-    
+
     const otpData = otpStore.get(whatsapp);
-    
+
     if (!otpData) {
-      return res.status(400).json({ 
-        message: "OTP expired or not found" 
+      return res.status(400).json({
+        message: "OTP expired or not found",
       });
     }
-    
+
     if (Date.now() > otpData.expiresAt) {
       otpStore.delete(whatsapp);
-      return res.status(400).json({ 
-        message: "OTP has expired" 
+      return res.status(400).json({
+        message: "OTP has expired",
       });
     }
-    
+
     if (otpData.otp !== otp) {
-      return res.status(400).json({ 
-        message: "Invalid OTP" 
+      return res.status(400).json({
+        message: "Invalid OTP",
       });
     }
-    
+
     const { username, password, name } = otpData.userData;
-    
+
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
-    
+
     // Create new user
     const newUser = new User({
       name,
@@ -491,23 +521,23 @@ router.post("/verify-otp", async (req, res) => {
       email: `${username.toLowerCase()}@linkinbio.temp`,
       password: hashedPassword,
       isVerified: true,
-      theme: {}
+      theme: {},
     });
-    
+
     await newUser.save();
-    
+
     // Generate JWT token
     const token = jwt.sign(
-      { 
-        userId: newUser._id, 
-        username: newUser.username 
+      {
+        userId: newUser._id,
+        username: newUser.username,
       },
       process.env.JWT_SECRET || "your-secret-key",
       { expiresIn: "30d" }
     );
-    
+
     otpStore.delete(whatsapp);
-    
+
     res.status(201).json({
       message: "Account created successfully",
       token,
@@ -516,10 +546,9 @@ router.post("/verify-otp", async (req, res) => {
         name: newUser.name,
         username: newUser.username,
         profileImage: newUser.profileImage,
-        bio: newUser.bio
-      }
+        bio: newUser.bio,
+      },
     });
-    
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message });
   }
@@ -529,41 +558,41 @@ router.post("/verify-otp", async (req, res) => {
 router.post("/login", async (req, res) => {
   try {
     const { username, password } = req.body;
-    
+
     if (!username || !password) {
-      return res.status(400).json({ 
-        message: "WhatsApp number and password are required" 
+      return res.status(400).json({
+        message: "WhatsApp number and password are required",
       });
     }
-    
+
     const user = await User.findOne({ username: username });
-    
+
     if (!user) {
-      return res.status(401).json({ 
-        message: "Invalid credentials" 
+      return res.status(401).json({
+        message: "Invalid credentials",
       });
     }
-    
+
     const isPasswordValid = await bcrypt.compare(password, user.password);
-    
+
     if (!isPasswordValid) {
-      return res.status(401).json({ 
-        message: "Invalid credentials" 
+      return res.status(401).json({
+        message: "Invalid credentials",
       });
     }
-    
+
     user.lastLogin = new Date();
     await user.save();
-    
+
     const token = jwt.sign(
-      { 
-        userId: user._id, 
-        username: user.username 
+      {
+        userId: user._id,
+        username: user.username,
       },
       process.env.JWT_SECRET || "your-secret-key",
       { expiresIn: "30d" }
     );
-    
+
     res.status(200).json({
       message: "Login successful",
       token,
@@ -572,10 +601,9 @@ router.post("/login", async (req, res) => {
         name: user.name,
         username: user.username,
         profileImage: user.profileImage,
-        bio: user.bio
-      }
+        bio: user.bio,
+      },
     });
-    
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message });
   }
@@ -585,43 +613,42 @@ router.post("/login", async (req, res) => {
 router.post("/resend-otp", async (req, res) => {
   try {
     const { whatsapp } = req.body;
-    
+
     if (!whatsapp) {
-      return res.status(400).json({ 
-        message: "WhatsApp number is required" 
+      return res.status(400).json({
+        message: "WhatsApp number is required",
       });
     }
-    
+
     const existingData = otpStore.get(whatsapp);
-    
+
     if (!existingData) {
-      return res.status(400).json({ 
-        message: "No pending signup found" 
+      return res.status(400).json({
+        message: "No pending signup found",
       });
     }
-    
+
     const otp = generateOTP();
-    
+
     otpStore.set(whatsapp, {
       ...existingData,
       otp,
-      expiresAt: Date.now() + 5 * 60 * 1000
+      expiresAt: Date.now() + 5 * 60 * 1000,
     });
-    
+
     const result = await sendWhatsAppOTP(whatsapp, otp);
-    
+
     if (!result.success) {
-      return res.status(500).json({ 
+      return res.status(500).json({
         message: "Failed to resend OTP",
-        error: result.error
+        error: result.error,
       });
     }
-    
-    res.status(200).json({ 
+
+    res.status(200).json({
       message: "OTP resent successfully",
-      devOTP: process.env.NODE_ENV === 'development' ? otp : undefined
+      devOTP: process.env.NODE_ENV === "development" ? otp : undefined,
     });
-    
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message });
   }
@@ -631,16 +658,16 @@ router.post("/resend-otp", async (req, res) => {
 const authMiddleware = (req, res, next) => {
   try {
     const token = req.header("Authorization")?.replace("Bearer ", "");
-    
+
     if (!token) {
       return res.status(401).json({ message: "No token provided" });
     }
-    
+
     const decoded = jwt.verify(
-      token, 
+      token,
       process.env.JWT_SECRET || "your-secret-key"
     );
-    
+
     req.userId = decoded.userId;
     req.username = decoded.username;
     next();
@@ -653,11 +680,11 @@ const authMiddleware = (req, res, next) => {
 router.get("/me", authMiddleware, async (req, res) => {
   try {
     const user = await User.findById(req.userId).select("-password");
-    
+
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
-    
+
     res.status(200).json({ user });
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message });
