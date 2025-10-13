@@ -9,11 +9,32 @@ const SocialLinkSchema = new mongoose.Schema(
       required: true,
       lowercase: true,
       enum: [
-        "instagram", "call", "contact", "facebook", "twitter", 
-        "youtube", "linkedin", "tiktok", "spotify", "github", 
-        "behance", "dribbble", "discord", "reddit", "telegram", 
-        "twitch", "pinterest", "whatsapp", "snapchat", "clubhouse", 
-        "amazon", "flipkart", "googleplay", "email", "music", "podcast"
+        "instagram",
+        "call",
+        "contact",
+        "facebook",
+        "twitter",
+        "youtube",
+        "linkedin",
+        "tiktok",
+        "spotify",
+        "github",
+        "behance",
+        "dribbble",
+        "discord",
+        "reddit",
+        "telegram",
+        "twitch",
+        "pinterest",
+        "whatsapp",
+        "snapchat",
+        "clubhouse",
+        "amazon",
+        "flipkart",
+        "googleplay",
+        "email",
+        "music",
+        "podcast",
       ],
     },
     url: { type: String, required: true },
@@ -30,13 +51,23 @@ const LinkSchema = new mongoose.Schema(
     url: {
       type: String,
       required: true,
+      trim: true,
       validate: {
         validator: function (v) {
-          return /^https?:\/\/.+/.test(v);
+          // Basic domain or full URL validation
+          return /^(https?:\/\/)?[a-zA-Z0-9.-]+\.[a-z]{2,}(\/.*)?$/.test(v);
         },
-        message: "URL must start with http:// or https://",
+        message: "Please enter a valid URL or domain",
+      },
+      set: function (v) {
+        // Automatically add https:// if missing
+        if (v && !/^https?:\/\//i.test(v)) {
+          return `https://${v.trim()}`;
+        }
+        return v.trim();
       },
     },
+
     icon: { type: String },
     order: { type: Number, default: 0 },
     clicks: { type: Number, default: 0 },
@@ -124,7 +155,8 @@ const UserSchema = new mongoose.Schema(
         validator: function (v) {
           return /^[a-z0-9_]+$/.test(v);
         },
-        message: "Username can only contain lowercase letters, numbers, and underscores",
+        message:
+          "Username can only contain lowercase letters, numbers, and underscores",
       },
     },
     profileImage: { type: String, default: "" },

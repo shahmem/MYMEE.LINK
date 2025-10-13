@@ -19,7 +19,7 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 
 // User routes
-router.get("/user", GetUser);
+// router.get("/user", GetUser);
 router.put("/user/:userId/username", updateUsername);
 router.get("/user/:userId", GetUser);
 router.put("/user/:userId/header", AddHeader);

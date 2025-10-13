@@ -23,15 +23,14 @@ const GetUser = async (req, res) => {
   try {
     const { userId } = req.params;
 
-    const user = userId
-      ? await User.findById(userId)
-      : await User.findOne();
+    const user = userId ? await User.findById(userId) : await User.findOne();
 
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    const theme = user.theme && Object.keys(user.theme).length > 0
-      ? user.theme
-      : defaultTheme;
+    const theme =
+      user.theme && Object.keys(user.theme).length > 0
+        ? user.theme
+        : defaultTheme;
 
     res.json({ ...user.toObject(), theme });
   } catch (err) {
@@ -62,40 +61,41 @@ const UpdateProfile = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
-const updateUsername =  async (req, res) => {
+const updateUsername = async (req, res) => {
   try {
     const { userId } = req.params;
     const { username, urlFormat } = req.body;
 
     if (!username || username.length < 3) {
-      return res.status(400).json({ 
-        message: "Username must be at least 3 characters" 
+      return res.status(400).json({
+        message: "Username must be at least 3 characters",
       });
     }
 
     // Validate username format
     if (!/^[a-z0-9_]+$/.test(username)) {
-      return res.status(400).json({ 
-        message: "Username can only contain lowercase letters, numbers, and underscores" 
+      return res.status(400).json({
+        message:
+          "Username can only contain lowercase letters, numbers, and underscores",
       });
     }
 
     // Validate URL format
-    if (urlFormat && !['subdomain', 'path'].includes(urlFormat)) {
-      return res.status(400).json({ 
-        message: "Invalid URL format" 
+    if (urlFormat && !["subdomain", "path"].includes(urlFormat)) {
+      return res.status(400).json({
+        message: "Invalid URL format",
       });
     }
 
     // Check if username already exists (excluding current user)
-    const existingUser = await User.findOne({ 
+    const existingUser = await User.findOne({
       username: username.toLowerCase(),
-      _id: { $ne: userId }
+      _id: { $ne: userId },
     });
 
     if (existingUser) {
-      return res.status(400).json({ 
-        message: "Username already taken" 
+      return res.status(400).json({
+        message: "Username already taken",
       });
     }
 
@@ -111,17 +111,16 @@ const updateUsername =  async (req, res) => {
     }
     await user.save();
 
-    res.json({ 
+    res.json({
       message: "Settings updated successfully",
       username: user.username,
-      urlFormat: user.urlFormat
+      urlFormat: user.urlFormat,
     });
-
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Server error" });
   }
-}
+};
 
 // ========== REGULAR LINKS ==========
 
@@ -133,7 +132,7 @@ const AddLinks = async (req, res) => {
 
     if (!title || !url)
       return res.status(400).json({ error: "Title and URL required" });
-    
+
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ error: "User not found" });
 
@@ -142,6 +141,7 @@ const AddLinks = async (req, res) => {
         ? Math.max(...user.links.map((link) => link.order)) + 1
         : 0;
 
+    // ✅ Schema's `set()` will handle adding https:// if missing
     user.links.push({ title, url, icon, order: nextOrder });
     await user.save();
 
@@ -223,7 +223,7 @@ const DeleteLink = async (req, res) => {
   try {
     const { userId } = req.params;
     const { linkId } = req.body;
-    
+
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ message: "User not found" });
 
@@ -251,7 +251,7 @@ const AddSocialLink = async (req, res) => {
   try {
     const { userId } = req.params;
     const { title, url, icon } = req.body;
-    
+
     if (!title || !url || !icon) {
       return res.status(400).json({ message: "All fields are required" });
     }
@@ -271,24 +271,24 @@ const AddSocialLink = async (req, res) => {
       url,
       icon: icon.toLowerCase(),
       socialorder: nextSocialOrder,
-      active: true
+      active: true,
     };
-    
+
     user.socialLinks.push(newLink);
     await user.save();
-    
+
     res.status(201).json(user.socialLinks[user.socialLinks.length - 1]);
   } catch (error) {
     console.error(error);
-    
+
     // Handle validation errors (enum mismatch)
-    if (error.name === 'ValidationError') {
-      return res.status(400).json({ 
-        message: "Invalid social platform", 
-        error: error.message 
+    if (error.name === "ValidationError") {
+      return res.status(400).json({
+        message: "Invalid social platform",
+        error: error.message,
       });
     }
-    
+
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
@@ -300,7 +300,9 @@ const GetSocialLinks = async (req, res) => {
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ error: "User not found" });
 
-    const sortedLinks = user.socialLinks.sort((a, b) => a.socialorder - b.socialorder);
+    const sortedLinks = user.socialLinks.sort(
+      (a, b) => a.socialorder - b.socialorder
+    );
     res.json(sortedLinks);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -310,19 +312,23 @@ const GetSocialLinks = async (req, res) => {
 const ReorderSocialLinks = async (req, res) => {
   const { userId } = req.params;
   const { links } = req.body;
-  
+
   try {
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ error: "User not found" });
 
     links.forEach(({ _id, order }) => {
-      const linkDoc = user.socialLinks.find((link) => link._id.toString() === _id);
+      const linkDoc = user.socialLinks.find(
+        (link) => link._id.toString() === _id
+      );
       if (linkDoc) linkDoc.socialorder = order;
     });
 
     await user.save();
 
-    const sortedLinks = user.socialLinks.sort((a, b) => a.socialorder - b.socialorder);
+    const sortedLinks = user.socialLinks.sort(
+      (a, b) => a.socialorder - b.socialorder
+    );
     res.json({ success: true, links: sortedLinks });
   } catch (err) {
     console.error(err);
@@ -367,10 +373,14 @@ const DeleteSocialLink = async (req, res) => {
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ error: "User not found" });
 
-    user.socialLinks = user.socialLinks.filter((link) => link._id.toString() !== linkId);
+    user.socialLinks = user.socialLinks.filter(
+      (link) => link._id.toString() !== linkId
+    );
     await user.save();
 
-    const sortedLinks = user.socialLinks.sort((a, b) => a.socialorder - b.socialorder);
+    const sortedLinks = user.socialLinks.sort(
+      (a, b) => a.socialorder - b.socialorder
+    );
     res.json({ success: true, links: sortedLinks });
   } catch (err) {
     console.error("DeleteSocialLink error:", err);
@@ -384,7 +394,7 @@ const AddHeader = async (req, res) => {
   try {
     const { userId } = req.params;
     const { header } = req.body;
-    
+
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ error: "User not found" });
 
