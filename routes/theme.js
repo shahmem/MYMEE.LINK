@@ -64,6 +64,7 @@ const builtinThemes = {
     linkRadius: "0px",
     linkBg: "#00000052",
     headerColor: "#111111",
+    linkBorderColor:"#333333",
   },
 };
 
@@ -102,7 +103,7 @@ router.post("/user/theme/builtin/:userId", async (req, res) => {
 });
 
 // ✅ Apply custom theme
-// Backend route - userRoutes.js or similar
+
 router.post(
   "/user/theme/custom/:userId",
   upload.single("themebg"),
@@ -120,6 +121,7 @@ router.post(
         linkBg,
         headerColor,
         fontStyle,
+        linkBorderColor,
       } = req.body;
 
       const user = await User.findById(req.params.userId);
@@ -139,6 +141,7 @@ router.post(
         linkColor: linkColor || user.theme?.linkColor || "#000000",
         linkRadius: linkRadius || user.theme?.linkRadius || "24px",
         linkBg: linkBg || user.theme?.linkBg || "#ffffff72",
+        linkBorderColor: linkBorderColor || user.theme?.linkBorderColor || "#ffffff72",
         headerColor: headerColor || user.theme?.headerColor || "#000000",
         fontStyle: fontStyle || user.theme?.fontStyle || "Inter, sans-serif",
       };

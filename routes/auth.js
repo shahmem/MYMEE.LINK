@@ -4,11 +4,11 @@ const router = express.Router();
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
+const Token = require("../models/Token");
 require("dotenv").config();
 
 // Initialize Twilio client
 const twilio = require("twilio");
-const nodemailer = require("nodemailer");
 const { Resend } = require("resend");
 
 const resend = new Resend(process.env.RESEND_API_KEY);
@@ -20,9 +20,9 @@ const emailOtpStore = new Map();
 const sendEmailOTP = async (email, otp) => {
   try {
     const { data, error } = await resend.emails.send({
-      from: 'Mymee.link <noreply@mymee.link>', // ✅ Change this line
+      from: "Mymee.link <noreply@mymee.link>", // ✅ Change this line
       to: email,
-      subject: 'Mymee.link - Email Verification',
+      subject: "Mymee.link - Email Verification",
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
           <h2 style="color: #333;">Verify Your Email</h2>
@@ -54,10 +54,67 @@ const generateOTP = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
+router.post("/check-token", async (req, res) => {
+  try {
+    const { token } = req.body;
+
+    if (!token) {
+      return res.status(400).json({
+        isValid: false,
+        message: "Token is required",
+      });
+    }
+
+    if (token.length !== 8) {
+      return res.status(400).json({
+        isValid: false,
+        message: "Token must be 8 characters",
+      });
+    }
+
+    if (!/^[A-Z0-9]{8}$/.test(token.toUpperCase())) {
+      return res.status(400).json({
+        isValid: false,
+        message: "Token must contain only letters and numbers",
+      });
+    }
+
+    const tokenDoc = await Token.findOne({
+      token: token.toUpperCase(),
+    });
+
+    if (!tokenDoc) {
+      return res.status(200).json({
+        isValid: false,
+        message: "Invalid token",
+      });
+    }
+
+    if (tokenDoc.isUsed) {
+      return res.status(200).json({
+        isValid: false,
+        message: "This token has already been used",
+      });
+    }
+
+    res.status(200).json({
+      isValid: true,
+      message: "Token is valid",
+    });
+  } catch (error) {
+    console.error("❌ Check Token Error:", error);
+    res.status(500).json({
+      isValid: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+});
+
 // 1. Send OTP to Email
 router.post("/send-email-otp", async (req, res) => {
   try {
-    const { email } = req.body;
+    const { email, signupToken } = req.body;
     console.log("📧 Sending OTP to:", email);
 
     if (!email) {
@@ -66,6 +123,16 @@ router.post("/send-email-otp", async (req, res) => {
 
     if (!/^\S+@\S+\.\S+$/.test(email)) {
       return res.status(400).json({ message: "Invalid email format" });
+    }
+
+    // 🔑 Validate token
+    if (!signupToken || signupToken.length !== 8) {
+      return res.status(400).json({ message: "Valid signup token is required" });
+    }
+
+    const isValidToken = await Token.isTokenValid(signupToken);
+    if (!isValidToken) {
+      return res.status(400).json({ message: "Invalid or already used token" });
     }
 
     const existingUser = await User.findOne({ email: email.toLowerCase() });
@@ -78,6 +145,7 @@ router.post("/send-email-otp", async (req, res) => {
 
     emailOtpStore.set(email.toLowerCase(), {
       otp,
+      signupToken: signupToken.toUpperCase(), // Store token with OTP data
       expiresAt: Date.now() + 5 * 60 * 1000,
     });
 
@@ -100,6 +168,7 @@ router.post("/send-email-otp", async (req, res) => {
     res.status(500).json({ message: "Server error", error: error.message });
   }
 });
+
 
 // 2. Resend Email OTP
 router.post("/resend-email-otp", async (req, res) => {
@@ -191,16 +260,17 @@ router.post("/verify-email-otp", async (req, res) => {
 // 4. Complete Email Signup (Create Account)
 router.post("/complete-email-signup", async (req, res) => {
   try {
-    const { email, otp, username, password } = req.body;
+    const { email, otp, username, password, signupToken } = req.body;
 
     console.log("📝 Complete Signup Request:", {
       email,
       username,
       hasOtp: !!otp,
       hasPassword: !!password,
+      hasToken: !!signupToken,
     });
 
-    if (!email || !otp || !username || !password) {
+    if (!email || !otp || !username || !password || !signupToken) {
       return res.status(400).json({
         message: "All fields are required",
       });
@@ -215,6 +285,21 @@ router.post("/complete-email-signup", async (req, res) => {
     if (!otpData || otpData.otp !== otp) {
       return res.status(400).json({
         message: "Invalid or expired OTP",
+      });
+    }
+
+    // 🔑 Verify token matches the one from OTP request
+    if (otpData.signupToken !== signupToken.toUpperCase()) {
+      return res.status(400).json({
+        message: "Token mismatch. Please restart signup process.",
+      });
+    }
+
+    // 🔑 Final token validation before creating user
+    const isValidToken = await Token.isTokenValid(signupToken);
+    if (!isValidToken) {
+      return res.status(400).json({
+        message: "Invalid or already used token",
       });
     }
 
@@ -239,8 +324,8 @@ router.post("/complete-email-signup", async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const newUser = new User({
-      name: username, // Use username as default name
-      username: username.toLowerCase(), 
+      name: username,
+      username: username.toLowerCase(),
       email: email.toLowerCase(),
       auth_id: email.toLowerCase(),
       password: hashedPassword,
@@ -250,6 +335,10 @@ router.post("/complete-email-signup", async (req, res) => {
 
     await newUser.save();
     console.log("✅ User created:", newUser._id);
+
+    // 🔑 Mark token as used
+    await Token.markAsUsed(signupToken, newUser._id);
+    console.log("✅ Token marked as used");
 
     const token = jwt.sign(
       {
@@ -302,7 +391,6 @@ const sendWhatsAppOTP = async (phoneNumber, otp) => {
     return { success: false, error: error.message };
   }
 };
-
 
 // 1. Check username availability
 router.post("/check-username", async (req, res) => {
@@ -384,12 +472,22 @@ router.post("/check-whatsapp", async (req, res) => {
 // 3. Send OTP to WhatsApp
 router.post("/send-otp", async (req, res) => {
   try {
-    const { whatsapp, username, password } = req.body;
+    const { whatsapp, username, password, signupToken } = req.body;
 
-    if (!whatsapp || !username || !password) {
+    if (!whatsapp || !username || !password || !signupToken) {
       return res.status(400).json({
         message: "All fields are required",
       });
+    }
+
+    // 🔑 Validate token
+    if (signupToken.length !== 8) {
+      return res.status(400).json({ message: "Valid signup token is required" });
+    }
+
+    const isValidToken = await Token.isTokenValid(signupToken);
+    if (!isValidToken) {
+      return res.status(400).json({ message: "Invalid or already used token" });
     }
 
     // Check if username already exists
@@ -413,10 +511,11 @@ router.post("/send-otp", async (req, res) => {
     // Generate OTP
     const otp = generateOTP();
 
-    // Store OTP with expiration (5 minutes)
+    // Store OTP with token
     otpStore.set(whatsapp, {
       otp,
       userData: { whatsapp, username, password },
+      signupToken: signupToken.toUpperCase(),
       expiresAt: Date.now() + 5 * 60 * 1000,
     });
 
@@ -439,14 +538,15 @@ router.post("/send-otp", async (req, res) => {
   }
 });
 
+
 // 4. Verify OTP and Create Account
 router.post("/verify-otp", async (req, res) => {
   try {
-    const { whatsapp, otp } = req.body;
+    const { whatsapp, otp, signupToken } = req.body;
 
-    if (!whatsapp || !otp) {
+    if (!whatsapp || !otp || !signupToken) {
       return res.status(400).json({
-        message: "WhatsApp number and OTP are required",
+        message: "WhatsApp number, OTP, and token are required",
       });
     }
 
@@ -471,6 +571,21 @@ router.post("/verify-otp", async (req, res) => {
       });
     }
 
+    // 🔑 Verify token matches
+    if (otpData.signupToken !== signupToken.toUpperCase()) {
+      return res.status(400).json({
+        message: "Token mismatch. Please restart signup process.",
+      });
+    }
+
+    // 🔑 Final token validation
+    const isValidToken = await Token.isTokenValid(signupToken);
+    if (!isValidToken) {
+      return res.status(400).json({
+        message: "Invalid or already used token",
+      });
+    }
+
     const { username, password, name } = otpData.userData;
 
     // Hash password
@@ -488,6 +603,10 @@ router.post("/verify-otp", async (req, res) => {
     });
 
     await newUser.save();
+
+    // 🔑 Mark token as used
+    await Token.markAsUsed(signupToken, newUser._id);
+    console.log("✅ Token marked as used");
 
     // Generate JWT token
     const token = jwt.sign(
@@ -636,6 +755,349 @@ const authMiddleware = (req, res, next) => {
     next();
   } catch (error) {
     res.status(401).json({ message: "Invalid token" });
+  }
+};
+
+const passwordResetStore = new Map();
+
+// 1. Request Password Reset OTP (for email users)
+router.post("/forgot-password-email", async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ message: "Email is required" });
+    }
+
+    if (!/^\S+@\S+\.\S+$/.test(email)) {
+      return res.status(400).json({ message: "Invalid email format" });
+    }
+
+    // Check if user exists
+    const user = await User.findOne({ email: email.toLowerCase() });
+
+    if (!user) {
+      // Don't reveal if email exists for security
+      return res.status(200).json({
+        message: "If this email is registered, you will receive a reset code",
+      });
+    }
+
+    // Generate OTP
+    const otp = generateOTP();
+
+    // Store OTP with expiration (10 minutes for password reset)
+    passwordResetStore.set(email.toLowerCase(), {
+      otp,
+      userId: user._id,
+      expiresAt: Date.now() + 10 * 60 * 1000,
+    });
+
+    // Send OTP via email
+    const result = await sendPasswordResetEmail(email, otp);
+
+    if (!result.success) {
+      return res.status(500).json({
+        message: "Failed to send reset code. Please try again.",
+        error: result.error,
+      });
+    }
+
+    res.status(200).json({
+      message: "Password reset code sent to your email",
+      devOTP: process.env.NODE_ENV === "development" ? otp : undefined,
+    });
+  } catch (error) {
+    console.error("❌ Forgot Password Error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+// 2. Request Password Reset OTP (for WhatsApp users)
+router.post("/forgot-password-whatsapp", async (req, res) => {
+  try {
+    const { whatsapp } = req.body;
+
+    if (!whatsapp) {
+      return res.status(400).json({ message: "WhatsApp number is required" });
+    }
+
+    // Check if user exists
+    const user = await User.findOne({ auth_id: whatsapp });
+
+    if (!user) {
+      // Don't reveal if number exists for security
+      return res.status(200).json({
+        message: "If this number is registered, you will receive a reset code",
+      });
+    }
+
+    // Generate OTP
+    const otp = generateOTP();
+
+    // Store OTP with expiration (10 minutes)
+    passwordResetStore.set(whatsapp, {
+      otp,
+      userId: user._id,
+      expiresAt: Date.now() + 10 * 60 * 1000,
+    });
+
+    // Send OTP via WhatsApp
+    const result = await sendPasswordResetWhatsApp(whatsapp, otp);
+
+    if (!result.success) {
+      return res.status(500).json({
+        message: "Failed to send reset code. Please try again.",
+        error: result.error,
+      });
+    }
+
+    res.status(200).json({
+      message: "Password reset code sent to your WhatsApp",
+      devOTP: process.env.NODE_ENV === "development" ? otp : undefined,
+    });
+  } catch (error) {
+    console.error("❌ Forgot Password WhatsApp Error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+// 3. Verify Password Reset OTP
+router.post("/verify-reset-otp", async (req, res) => {
+  try {
+    const { identifier, otp } = req.body; // identifier can be email or whatsapp
+
+    if (!identifier || !otp) {
+      return res.status(400).json({
+        message: "Identifier and OTP are required",
+      });
+    }
+
+    const resetData = passwordResetStore.get(identifier.toLowerCase());
+
+    if (!resetData) {
+      return res.status(400).json({
+        message: "Invalid or expired reset code",
+      });
+    }
+
+    if (Date.now() > resetData.expiresAt) {
+      passwordResetStore.delete(identifier.toLowerCase());
+      return res.status(400).json({
+        message: "Reset code has expired",
+      });
+    }
+
+    if (resetData.otp !== otp) {
+      return res.status(400).json({
+        message: "Invalid reset code",
+      });
+    }
+
+    // Mark as verified but don't delete yet
+    passwordResetStore.set(identifier.toLowerCase(), {
+      ...resetData,
+      verified: true,
+    });
+
+    res.status(200).json({
+      message: "Reset code verified successfully",
+      verified: true,
+    });
+  } catch (error) {
+    console.error("❌ Verify Reset OTP Error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+// 4. Reset Password with OTP
+router.post("/reset-password", async (req, res) => {
+  try {
+    const { identifier, otp, newPassword } = req.body;
+
+    if (!identifier || !otp || !newPassword) {
+      return res.status(400).json({
+        message: "All fields are required",
+      });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        message: "Password must be at least 6 characters long",
+      });
+    }
+
+    const resetData = passwordResetStore.get(identifier.toLowerCase());
+
+    if (!resetData || !resetData.verified) {
+      return res.status(400).json({
+        message: "Invalid or expired reset session",
+      });
+    }
+
+    if (Date.now() > resetData.expiresAt) {
+      passwordResetStore.delete(identifier.toLowerCase());
+      return res.status(400).json({
+        message: "Reset session has expired",
+      });
+    }
+
+    if (resetData.otp !== otp) {
+      return res.status(400).json({
+        message: "Invalid reset code",
+      });
+    }
+
+    // Find user and update password
+    const user = await User.findById(resetData.userId);
+
+    if (!user) {
+      return res.status(404).json({
+        message: "User not found",
+      });
+    }
+
+    // Hash new password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    user.password = hashedPassword;
+    await user.save();
+
+    // Clear reset data
+    passwordResetStore.delete(identifier.toLowerCase());
+
+    // Generate new token
+    const token = jwt.sign(
+      {
+        userId: user._id,
+        username: user.username,
+      },
+      process.env.JWT_SECRET || "your-secret-key",
+      { expiresIn: "30d" }
+    );
+
+    res.status(200).json({
+      message: "Password reset successfully",
+      token,
+      user: {
+        id: user._id,
+        name: user.name,
+        username: user.username,
+        email: user.email,
+        profileImage: user.profileImage,
+        bio: user.bio,
+      },
+    });
+  } catch (error) {
+    console.error("❌ Reset Password Error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+// 5. Resend Password Reset OTP
+router.post("/resend-reset-otp", async (req, res) => {
+  try {
+    const { identifier, type } = req.body; // type: 'email' or 'whatsapp'
+
+    if (!identifier || !type) {
+      return res.status(400).json({
+        message: "Identifier and type are required",
+      });
+    }
+
+    const existingReset = passwordResetStore.get(identifier.toLowerCase());
+
+    if (!existingReset) {
+      return res.status(400).json({
+        message: "No pending reset request found",
+      });
+    }
+
+    // Generate new OTP
+    const otp = generateOTP();
+
+    // Update stored data
+    passwordResetStore.set(identifier.toLowerCase(), {
+      ...existingReset,
+      otp,
+      expiresAt: Date.now() + 10 * 60 * 1000,
+      verified: false,
+    });
+
+    let result;
+    if (type === "email") {
+      result = await sendPasswordResetEmail(identifier, otp);
+    } else {
+      result = await sendPasswordResetWhatsApp(identifier, otp);
+    }
+
+    if (!result.success) {
+      return res.status(500).json({
+        message: "Failed to resend reset code",
+        error: result.error,
+      });
+    }
+
+    res.status(200).json({
+      message: "Reset code resent successfully",
+      devOTP: process.env.NODE_ENV === "development" ? otp : undefined,
+    });
+  } catch (error) {
+    console.error("❌ Resend Reset OTP Error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+// Helper function to send password reset email
+const sendPasswordResetEmail = async (email, otp) => {
+  try {
+    const { data, error } = await resend.emails.send({
+      from: "Mymee.link <noreply@mymee.link>",
+      to: email,
+      subject: "Mymee.link - Password Reset Code",
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #333;">Reset Your Password</h2>
+          <p style="font-size: 16px;">You requested to reset your password. Use the code below:</p>
+          <div style="background: #f4f4f4; padding: 20px; text-align: center; font-size: 32px; font-weight: bold; letter-spacing: 5px; margin: 20px 0;">
+            ${otp}
+          </div>
+          <p style="color: #666;">This code will expire in 10 minutes.</p>
+          <p style="color: #999; font-size: 12px;">If you didn't request this, please ignore this email and your password will remain unchanged.</p>
+        </div>
+      `,
+    });
+
+    if (error) {
+      console.error("❌ Resend Error:", error);
+      return { success: false, error: error.message };
+    }
+
+    console.log("✅ Password reset email sent:", data.id);
+    return { success: true };
+  } catch (error) {
+    console.error("❌ Password Reset Email Error:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+// Helper function to send password reset WhatsApp
+const sendPasswordResetWhatsApp = async (phoneNumber, otp) => {
+  try {
+    const accountSid = process.env.TWILIO_ACCOUNT_SID;
+    const authToken = process.env.TWILIO_AUTH_TOKEN;
+    const client = twilio(accountSid, authToken);
+
+    const message = await client.messages.create({
+      from: process.env.TWILIO_WHATSAPP_NUMBER,
+      body: `Your Mymee.link password reset code is: ${otp}. Valid for 10 minutes. If you didn't request this, please ignore.`,
+      to: `whatsapp:${phoneNumber}`,
+    });
+
+    console.log("✅ Password reset WhatsApp sent:", message.sid);
+    return { success: true, messageSid: message.sid };
+  } catch (error) {
+    console.error("❌ WhatsApp Password Reset Error:", error.message);
+    return { success: false, error: error.message };
   }
 };
 
