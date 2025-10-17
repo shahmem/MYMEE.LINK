@@ -35,7 +35,7 @@ const bcrypt = require("bcrypt");
 router.post("/user/:userId/verify-password", async (req, res) => {
   try {
     const { userId } = req.params;
-    console.log(userId);
+    console.log(userId); 
     
     const { currentPassword } = req.body;
 

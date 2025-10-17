@@ -6,12 +6,33 @@ const User = require("../models/User");
 const fs = require('fs');
 const path = require('path');
 
+// Helper function to sanitize filename
+const sanitizeFilename = (filename) => {
+  // Get file extension
+  const ext = path.extname(filename);
+  // Get filename without extension
+  const nameWithoutExt = path.basename(filename, ext);
+  
+  // Replace spaces with underscores and remove special characters
+  const sanitized = nameWithoutExt
+    .replace(/\s+/g, '_')  // Replace spaces with underscores
+    .replace(/[^a-zA-Z0-9_-]/g, '')  // Remove special characters except underscore and dash
+    .toLowerCase();  // Convert to lowercase for consistency
+  
+  return sanitized + ext.toLowerCase();
+};
+
 // Multer for image upload
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, "uploads/"),
-  filename: (req, file, cb) => cb(null, Date.now() + "-" + file.originalname),
+  filename: (req, file, cb) => {
+    const sanitizedName = sanitizeFilename(file.originalname);
+    const uniqueName = Date.now() + "-" + sanitizedName;
+    cb(null, uniqueName);
+  },
 });
 const upload = multer({ storage });
+
 // Helper function to delete file from filesystem
 const deleteFileFromServer = (filePath) => {
   if (!filePath) return;
@@ -133,7 +154,7 @@ router.post(
         bgType: bgType || user.theme?.bgType || "color",
         bgColor: bgColor || user.theme?.bgColor || "#ffffff",
         bgImage: user.theme?.bgImage || "",
-        bgVideo: user.theme?.bgVideo || "",
+        bgVideo: user.theme?.bgVideo || "", 
         nameColor: nameColor || user.theme?.nameColor || "#000000",
         bioColor: bioColor || user.theme?.bioColor || "rgba(0,0,0,0.40)",
         iconColor: iconColor || user.theme?.iconColor || "#000000",
@@ -152,10 +173,18 @@ router.post(
         const fileType = req.file.mimetype.split('/')[0]; // 'image' or 'video'
 
         if (fileType === 'image') {
+          // Delete old image if exists
+          if (user.theme?.bgImage) {
+            deleteFileFromServer(user.theme.bgImage);
+          }
           updatedTheme.bgImage = uploadPath;
           updatedTheme.bgVideo = ""; // Clear video if image uploaded
           updatedTheme.bgType = "image";
         } else if (fileType === 'video') {
+          // Delete old video if exists
+          if (user.theme?.bgVideo) {
+            deleteFileFromServer(user.theme.bgVideo);
+          }
           updatedTheme.bgVideo = uploadPath;
           updatedTheme.bgImage = ""; // Clear image if video uploaded
           updatedTheme.bgType = "video";
@@ -176,6 +205,7 @@ router.post(
     }
   }
 );
+
 router.delete("/user/theme/background/:userId", async (req, res) => {
   try {
     const { bgImage, bgVideo } = req.body;
